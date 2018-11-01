@@ -1,0 +1,68 @@
+1.- Crear directorios en hdfs
+hdfs dfs -mkdir /user/juan/bootcamp/
+hdfs dfs -mkdir /user/juan/bootcamp/log
+hdfs dfs -mkdir /user/juan/bootcamp/bd
+
+2.- Descargar log al servidor cluster
+
+wget http://34.205.65.241/access.log
+
+3.- Subir archivo log al hdfs
+
+hdfs dfs -put access.log /user/juan/bootcamp/log
+
+4.- Hacer ingesta base de datos MySQL al hdfs en formato Parquet con Sqoop 
+
+sqoop import --driver com.mysql.jdbc.Driver --connect jdbc:mysql://34.205.65.241/ecommerce_cloudera --username bootcamp --password bootcamp --query "select * from product_transaction where  \$CONDITIONS" --split-by transaction_id --target-dir /user/juan/bootcamp/bd --delete-target-dir --as-parquetfile
+
+
+5.-  Crear tabla en hive con SerDe
+
+
+CREATE EXTERNAL TABLE tabla_log (ip string, time_local string, method string, uri string, protocol string, status string, bytes_sent string, referer string, useragent string) ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.RegexSerDe' WITH SERDEPROPERTIES ('input.regex'='^(\\S+) \\S+ \\S+ \\[([^\\[]+)\\] "(\\w+) (\\S+) (\\S+)" (\\d+) (\\d+) "([^"]+)" "([^"]+)".*') LOCATION '/user/juan/bootcamp/log'; 
+
+
+6.-  Crear tabla de la ingesta de MySQL
+
+
+ CREATE EXTERNAL TABLE tabla_mysql LIKE PARQUET '/user/juan/bootcamp/bd/45c1a1f9-1ea5-492f-8673-39b0e8d89d01.parquet' STORED AS PARQUET LOCATION '/user/juan/bootcamp/bd';
+
+
+
+7.- Crear tabla con datos depurados
+create table producto_log as
+select trim(substr(uri,16)) as producto from tabla_log where uri like '/item/id?skuID=%' 
+
+8.- Crear tabla producto_visitas 
+
+create table productos_visita as
+
+select cast(producto as int) as producto, count(producto) as visitas
+from 
+producto_log
+group by producto
+
+9.- Crear tabla producto_cantidad
+create table productos_cantidad as
+
+select product_id, sum(product_cantity) 
+from product_transaction 
+group by product_id
+
+10.-  Crear tabla de conversion a partir del calculo 
+
+
+
+create table sku_conversion as
+
+select a.product_id as sku, (a.cantidad/b.visitas) as conversion
+from
+productos_cantidad a
+inner join productos_visita b on (a.product_id = b.producto)
+ 
+ 
+ 11.- Exportar datos a mysql
+
+
+ sqoop export --connect jdbc:mysql://34.205.65.241/ecommerce_cloudera --driver com.mysql.jdbc.Driver --username bootcamp --password bootcamp --table  conversion_11 --hcatalog-table sku_conversion
+ 
